@@ -41,6 +41,7 @@ auth:
 #   - yourdomain.com    # domain of your Google App (Google)
 #   - example@gmail.com # specific email address (same as above)
 #   - your_company_org  # organization name (GitHub)
+#   - your_company_org/your_team #organization team name (GitHub)
 
 # document root for static files
 htdocs: ./
@@ -91,7 +92,7 @@ auth:
 # restrict user request. (optional)
 restrictions:
   - foo_organization
-  - bar_organization
+  - bar_organization/bar_team
 ```
 
 #### github:e support

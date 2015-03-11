@@ -131,54 +131,127 @@ type GitHubAuth struct {
 	*BaseAuth
 }
 
+type OrgTeam struct {
+	organization string
+	team string
+}
+
 func (a *GitHubAuth) Authenticate(organizations []string, c martini.Context, tokens oauth2.Tokens, w http.ResponseWriter, r *http.Request) {
 	if len(organizations) > 0 {
-		req, err := http.NewRequest("GET", fmt.Sprintf("%s/user/orgs", a.conf.Auth.Info.ApiEndpoint), nil)
-		if err != nil {
-			log.Printf("failed to create a request to retrieve organizations: %s", err)
-			forbidden(w)
-			return
+		var orgSlice []OrgTeam
+		var teamSlice []OrgTeam
+		for _, org := range organizations {
+			var orgArray = strings.Split(org, "/")
+			if len(orgArray) > 1 {
+				teamSlice = append(teamSlice, OrgTeam{organization: orgArray[0], team: orgArray[1]})
+			} else {
+				orgSlice = append(orgSlice, OrgTeam{organization: orgArray[0]})
+			}
 		}
 
-		req.SetBasicAuth(tokens.Access(), "x-oauth-basic")
+		if len(orgSlice) > 0 {
+			req, err := http.NewRequest("GET", fmt.Sprintf("%s/user/orgs", a.conf.Auth.Info.ApiEndpoint), nil)
+			if err != nil {
+				log.Printf("failed to create a request to retrieve organizations: %s", err)
+				forbidden(w)
+				return
+			}
 
-		client := http.Client{}
-		res, err := client.Do(req)
-		if err != nil {
-			log.Printf("failed to retrieve organizations: %s", err)
-			forbidden(w)
-			return
+			req.SetBasicAuth(tokens.Access(), "x-oauth-basic")
+
+			client := http.Client{}
+			res, err := client.Do(req)
+			if err != nil {
+				log.Printf("failed to retrieve organizations: %s", err)
+				forbidden(w)
+				return
+			}
+
+			data, err := ioutil.ReadAll(res.Body)
+			res.Body.Close()
+
+			if err != nil {
+				log.Printf("failed to read body of GitHub response: %s", err)
+				forbidden(w)
+				return
+			}
+
+			var info []map[string]interface{}
+			if err := json.Unmarshal(data, &info); err != nil {
+				log.Printf("failed to decode json: %s", err.Error())
+				forbidden(w)
+				return
+			}
+
+			for _, userOrg := range info {
+				for _, org := range orgSlice {
+					if userOrg["login"] == org.organization {
+						return
+					}
+				}
+			}
 		}
+		if len(teamSlice) > 0 {
+			req, err := http.NewRequest("GET", fmt.Sprintf("%s/user/teams", a.conf.Auth.Info.ApiEndpoint), nil)
+			if err != nil {
+				log.Printf("failed to create a request to retrieve teams: %s", err)
+				forbidden(w)
+				return
+			}
 
-		data, err := ioutil.ReadAll(res.Body)
-		res.Body.Close()
+			req.SetBasicAuth(tokens.Access(), "x-oauth-basic")
 
-		if err != nil {
-			log.Printf("failed to read body of GitHub response: %s", err)
-			forbidden(w)
-			return
-		}
+			client := http.Client{}
+			res, err := client.Do(req)
+			if err != nil {
+				log.Printf("failed to retrieve teams: %s", err)
+				forbidden(w)
+				return
+			}
 
-		var info []map[string]interface{}
-		if err := json.Unmarshal(data, &info); err != nil {
-			log.Printf("failed to decode json: %s", err.Error())
-			forbidden(w)
-			return
-		}
+			data, err := ioutil.ReadAll(res.Body)
+			res.Body.Close()
 
-		for _, userOrg := range info {
-			for _, org := range organizations {
-				if userOrg["login"] == org {
+			if err != nil {
+				log.Printf("failed to read body of GitHub response: %s", err)
+				forbidden(w)
+				return
+			}
+
+			var info []map[string]json.RawMessage
+			if err := json.Unmarshal(data, &info); err != nil {
+				log.Printf("failed to decode json: %s", err.Error())
+				forbidden(w)
+				return
+			}
+
+			for _, userTeam := range info {
+				var orgInfo map[string]interface{}
+				if err := json.Unmarshal(userTeam["organization"], &orgInfo); err != nil {
+					log.Printf("failed to decode json: %s", err.Error())
+					forbidden(w)
 					return
+				}
+				var teamInfo string
+				if err := json.Unmarshal(userTeam["slug"], &teamInfo); err != nil {
+					log.Printf("failed to decode json: %s", err.Error())
+					forbidden(w)
+					return
+				}
+				for _, team := range teamSlice {
+					if orgInfo["login"] == team.organization && teamInfo == team.team {
+						return
+					}
 				}
 			}
 		}
 
-		log.Print("not a member of designated organizations")
+		log.Print("not a member of designated organizations/teams")
 		forbidden(w)
 		return
 	}
 }
+
 
 func forbidden(w http.ResponseWriter) {
 	w.WriteHeader(403)
